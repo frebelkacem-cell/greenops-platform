@@ -1,0 +1,27 @@
+# Secrets — JAMAIS dans Git
+.env
+k8s/secrets/secrets.yml
+
+# Node
+node_modules/
+npm-debug.log*
+
+# React builds
+*/build/
+dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.tar
+
+# Logs
+*.log
+logs/

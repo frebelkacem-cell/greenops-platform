@@ -1,0 +1,56 @@
+groups:
+  - name: greenops.critical
+    rules:
+      - alert: HighCPULoad
+        expr: greenops_device_cpu_load > 90
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "CPU critique sur {{ $labels.device }}"
+          description: "CPU à {{ $value }}% depuis 2 minutes"
+
+      - alert: HighTemperature
+        expr: greenops_device_temperature > 80
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Température critique sur {{ $labels.device }}"
+          description: "Température à {{ $value }}°C"
+
+      - alert: HighPUE
+        expr: datacenter_global_pue > 2.0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PUE élevé détecté"
+          description: "PUE global à {{ $value }} (seuil: 2.0)"
+
+      - alert: APIDown
+        expr: up{job="api-centrale"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API Centrale hors ligne"
+          description: "Le job api-centrale n'est plus scraped par Prometheus"
+
+      - alert: HighNetworkTraffic
+        expr: greenops_device_network_traffic > 900
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Trafic réseau élevé sur {{ $labels.device }}"
+          description: "Trafic à {{ $value }} Mbps (seuil: 900)"
+
+      - alert: HighFanSpeed
+        expr: greenops_device_fan_speed > 4500
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Ventilateur en survitesse sur {{ $labels.device }}"
+          description: "Vitesse à {{ $value }} RPM (seuil: 4500)"

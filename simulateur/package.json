@@ -1,0 +1,12 @@
+{
+  "name": "simulateur",
+  "version": "1.0.0",
+  "description": "GreenOps metrics simulator",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "node-fetch": "^2.7.0"
+  }
+}

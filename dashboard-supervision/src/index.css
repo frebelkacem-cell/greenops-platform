@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; padding: 0; background: #060810; }
+body { font-family: 'Courier New', monospace; color: #e8eaf6; }
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-track { background: #060810; }
+::-webkit-scrollbar-thumb { background: #10e888; border-radius: 2px; }
+
+.panel {
+  background: #0b0e1a;
+  border: 1px solid #1a2040;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+}
+
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+.blink { animation: blink 1s ease-in-out infinite; }
+
+@keyframes slideIn { from{transform:translateX(-12px);opacity:0} to{transform:translateX(0);opacity:1} }
+.slide-in { animation: slideIn 0.25s ease forwards; }

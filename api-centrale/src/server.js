@@ -6,6 +6,7 @@ const { initRedis }    = require('./redis');
 const { register }     = require('./prometheus');
 const authRouter    = require('./routes.auth');
 const metricsRouter = require('./routes.metrics');
+const devicesRouter = require('./routes.devices');
 
 const PORT = 3000;
 const app  = express();
@@ -28,6 +29,7 @@ app.get('/metrics', async (req, res) => {
 
 app.use('/api/auth',    authRouter);
 app.use('/api/metrics', metricsRouter);
+app.use('/api/devices', devicesRouter);
 
 app.use((req, res) => {
   res.status(404).json({ error: `Route ${req.method} ${req.path} introuvable.` });

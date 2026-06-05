@@ -1,70 +1,111 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
+// ── API helpers ───────────────────────────────────────────────────────────────
 const getToken = () => localStorage.getItem('greenops_token');
+const authHeader = () => ({ Authorization: `Bearer ${getToken()}` });
 
 async function apiLogin(username, password) {
   const res = await fetch('/api/auth/login', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),
   });
-  if (!res.ok) { const d = await res.json().catch(()=>({})); throw new Error(d.error||`HTTP ${res.status}`); }
+  if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `HTTP ${res.status}`); }
+  return res.json();
+}
+
+async function apiGetDevices() {
+  const res = await fetch('/api/devices', { headers: authHeader() });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+async function apiGetLive() {
+  const res = await fetch('/api/metrics/live', { headers: authHeader() });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
 
 async function apiUpdate(device, updates) {
   const res = await fetch('/api/metrics/update', {
     method: 'POST',
-    headers: { 'Content-Type':'application/json', Authorization:`Bearer ${getToken()}` },
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
     body: JSON.stringify({ device, updates }),
   });
-  if (!res.ok) { const d = await res.json().catch(()=>({})); throw new Error(d.error||`HTTP ${res.status}`); }
+  if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `HTTP ${res.status}`); }
   return res.json();
 }
 
-async function apiLive() {
-  const res = await fetch('/api/metrics/live', { headers: { Authorization:`Bearer ${getToken()}` } });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+async function apiAddDevice(name, type, metrics) {
+  const res = await fetch('/api/devices', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify({ name, type, metrics }),
+  });
+  if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `HTTP ${res.status}`); }
   return res.json();
 }
+
+async function apiDeleteDevice(name) {
+  const res = await fetch(`/api/devices/${encodeURIComponent(name)}`, {
+    method: 'DELETE', headers: authHeader(),
+  });
+  if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `HTTP ${res.status}`); }
+  return res.json();
+}
+
+// ── Couleurs par type ─────────────────────────────────────────────────────────
+const TYPE_COLORS = {
+  firewall: '#00f5ff', switch: '#00ff88', vm: '#bf00ff',
+  server: '#3b82f6',  router: '#f59e0b', storage: '#84cc16',
+  default: '#00d4aa',
+};
+const TYPE_LABELS = {
+  firewall: 'PARE-FEU', switch: 'SWITCH', vm: 'MACHINE VIRTUELLE',
+  server: 'SERVEUR', router: 'ROUTEUR', storage: 'STOCKAGE', default: 'ÉQUIPEMENT',
+};
+function deviceColor(type) { return TYPE_COLORS[type] || TYPE_COLORS.default; }
+function deviceLabel(type) { return TYPE_LABELS[type] || TYPE_LABELS.default; }
 
 // ── Styles communs ────────────────────────────────────────────────────────────
 const S = {
-  panel: { background:'#0d0d14', border:'1px solid rgba(0,245,255,0.15)',
-    boxShadow:'0 4px 24px rgba(0,0,0,0.5)', position:'relative', padding:'20px' },
-  label: { color:'rgba(0,245,255,0.4)', fontSize:'10px', letterSpacing:'0.2em', textTransform:'uppercase', marginBottom:'6px' },
-  neonText: (color='#00f5ff') => ({ color, textShadow:`0 0 10px ${color}60` }),
+  panel: (color) => ({
+    background: '#0d0d14',
+    border: `1px solid ${color}30`,
+    boxShadow: `0 4px 24px rgba(0,0,0,0.5), inset 0 0 30px ${color}04`,
+    position: 'relative',
+    padding: '18px',
+    transition: 'border-color 0.4s',
+  }),
+  label: { color: 'rgba(0,245,255,0.4)', fontSize: '10px', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '5px' },
 };
 
 // ── LOGIN ─────────────────────────────────────────────────────────────────────
 function Login({ onLogin }) {
-  const [u,setU]=useState('admin'), [p,setP]=useState('admin'), [err,setErr]=useState(''), [load,setLoad]=useState(false);
+  const [u, setU] = useState('admin'), [p, setP] = useState('admin');
+  const [err, setErr] = useState(''), [load, setLoad] = useState(false);
   async function submit(e) {
     e.preventDefault(); setErr(''); setLoad(true);
-    try { const d=await apiLogin(u,p); localStorage.setItem('greenops_token',d.token); onLogin(d); }
-    catch(e){ setErr(e.message); } finally{ setLoad(false); }
+    try { const d = await apiLogin(u, p); localStorage.setItem('greenops_token', d.token); onLogin(d); }
+    catch (e) { setErr(e.message); } finally { setLoad(false); }
   }
   return (
-    <div style={{ minHeight:'100vh', background:'#0a0a0c', display:'flex', alignItems:'center', justifyContent:'center' }}>
-      <div style={{ ...S.panel, width:'360px', border:'1px solid rgba(0,245,255,0.3)',
-        boxShadow:'0 0 60px rgba(0,245,255,0.08)' }}>
-        <div style={{ textAlign:'center', marginBottom:'28px' }}>
-          <div style={{ ...S.neonText(), fontFamily:'Courier New', fontSize:'22px', fontWeight:'bold',
-            letterSpacing:'0.3em', marginBottom:'4px' }}>GREENOPS</div>
-          <div style={{ color:'rgba(0,245,255,0.35)', fontSize:'10px', letterSpacing:'0.4em' }}>TOUR DE CONTRÔLE ADMIN</div>
+    <div style={{ minHeight: '100vh', background: '#0a0a0c', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ background: '#0d0d14', border: '1px solid rgba(0,245,255,0.3)', padding: '2rem', width: '360px', boxShadow: '0 0 60px rgba(0,245,255,0.08)' }}>
+        <div style={{ textAlign: 'center', marginBottom: '28px' }}>
+          <div style={{ color: '#00f5ff', textShadow: '0 0 10px #00f5ff60', fontFamily: 'Courier New', fontSize: '22px', fontWeight: 'bold', letterSpacing: '0.3em', marginBottom: '4px' }}>GREENOPS</div>
+          <div style={{ color: 'rgba(0,245,255,0.35)', fontSize: '10px', letterSpacing: '0.4em' }}>TOUR DE CONTRÔLE ADMIN</div>
         </div>
         <form onSubmit={submit}>
-          {[['IDENTIFIANT','text',u,setU],['MOT DE PASSE','password',p,setP]].map(([label,type,val,set],i)=>(
-            <div key={i} style={{ marginBottom:'14px' }}>
+          {[['IDENTIFIANT', 'text', u, setU], ['MOT DE PASSE', 'password', p, setP]].map(([label, type, val, set], i) => (
+            <div key={i} style={{ marginBottom: '14px' }}>
               <div style={S.label}>{label}</div>
-              <input type={type} value={val} onChange={e=>set(e.target.value)}
-                style={{ width:'100%', background:'#060810', border:'1px solid rgba(0,245,255,0.2)',
-                  color:'#00f5ff', padding:'8px 12px', fontFamily:'Courier New', outline:'none', boxSizing:'border-box' }} />
+              <input type={type} value={val} onChange={e => set(e.target.value)}
+                style={{ width: '100%', background: '#060810', border: '1px solid rgba(0,245,255,0.2)', color: '#00f5ff', padding: '8px 12px', fontFamily: 'Courier New', outline: 'none', boxSizing: 'border-box' }} />
             </div>
           ))}
-          {err && <div style={{ color:'#ff2244', fontSize:'11px', marginBottom:'12px', textAlign:'center' }}>⚠ {err}</div>}
+          {err && <div style={{ color: '#ff2244', fontSize: '11px', marginBottom: '12px', textAlign: 'center' }}>⚠ {err}</div>}
           <button type="submit" disabled={load}
-            style={{ width:'100%', padding:'10px', background:'transparent', border:'2px solid #00f5ff',
-              ...S.neonText(), fontFamily:'Courier New', letterSpacing:'0.2em', cursor:'pointer', fontSize:'12px' }}>
+            style={{ width: '100%', padding: '10px', background: 'transparent', border: '2px solid #00f5ff', color: '#00f5ff', textShadow: '0 0 8px #00f5ff60', fontFamily: 'Courier New', letterSpacing: '0.2em', cursor: 'pointer', fontSize: '12px' }}>
             {load ? 'AUTHENTIFICATION...' : '▶ CONNEXION SÉCURISÉE'}
           </button>
         </form>
@@ -73,440 +114,328 @@ function Login({ onLogin }) {
   );
 }
 
-// ── CARD F5 FIREWALL ──────────────────────────────────────────────────────────
-function F5Card() {
-  const [traffic, setTraffic] = useState(1.2);
-  const [temp,    setTemp]    = useState(22.0);
-  const [cpu,     setCpu]     = useState(15.0);
-  const [status,  setStatus]  = useState(null);
-  const sliderRef  = useRef(null);
+// ── SLIDER métrique ───────────────────────────────────────────────────────────
+function MetricSlider({ label, value, min, max, step = 0.1, unit, color, onChange }) {
+  const pct = Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100));
+  return (
+    <div style={{ marginBottom: '10px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+        <span style={{ color: 'rgba(0,245,255,0.4)', fontSize: '10px', letterSpacing: '0.15em', textTransform: 'uppercase' }}>{label}</span>
+        <span style={{ color, fontSize: '12px', fontFamily: 'Courier New', fontWeight: 'bold' }}>
+          {typeof value === 'number' ? value.toFixed(step < 1 ? 1 : 0) : '—'}{unit}
+        </span>
+      </div>
+      <div style={{ position: 'relative', height: '4px', background: '#1a1a2e', borderRadius: '2px', marginBottom: '4px' }}>
+        <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: '2px', boxShadow: `0 0 4px ${color}80`, transition: 'width 0.3s ease' }} />
+      </div>
+      <input type="range" min={min} max={max} step={step} value={value}
+        onChange={e => onChange(parseFloat(e.target.value))}
+        style={{ width: '100%', accentColor: color, cursor: 'pointer', height: '14px' }} />
+    </div>
+  );
+}
+
+// ── DEVICE CARD ───────────────────────────────────────────────────────────────
+function DeviceCard({ device, liveMetrics, onDelete }) {
+  const color = deviceColor(device.type);
+  const [metrics, setMetrics] = useState({
+    temperature: 20, cpu_load: 10, ram: 20, network_traffic: 0.5, fan_speed: 1000,
+  });
+  const [status, setStatus]     = useState(null);
+  const [confirm, setConfirm]   = useState(false);
   const timerRef   = useRef(null);
-  const draggingRef = useRef(false);
+  const activeRef  = useRef(false); // true pendant qu'on drag un slider
 
-  const isCrit = traffic > 80;
-
-  // Sync depuis l'API toutes les 3s sauf si slider actif
+  // Sync depuis live (sauf si l'utilisateur est en train de modifier)
   useEffect(() => {
-    function sync() {
-      if (draggingRef.current) return;
-      apiLive().then(d => {
-        const m = d.devices?.['F5 Firewall'];
-        if (!m) return;
-        const t = parseFloat(m.network_traffic) || 0;
-        setTraffic(t);
-        setTemp(parseFloat(m.temperature) || 22);
-        setCpu(parseFloat(m.cpu_load) || 15);
-        if (sliderRef.current) sliderRef.current.style.setProperty('--val', `${t}%`);
-      }).catch(()=>{});
-    }
-    sync();
-    const id = setInterval(sync, 1500);
-    return () => clearInterval(id);
-  }, []);
+    if (!liveMetrics || activeRef.current) return;
+    setMetrics(prev => ({
+      temperature:     liveMetrics.temperature     ?? prev.temperature,
+      cpu_load:        liveMetrics.cpu_load        ?? prev.cpu_load,
+      ram:             liveMetrics.ram             ?? prev.ram,
+      network_traffic: liveMetrics.network_traffic ?? prev.network_traffic,
+      fan_speed:       liveMetrics.fan_speed       ?? prev.fan_speed,
+    }));
+  }, [liveMetrics]);
 
-  function updateFill(val) {
-    if (sliderRef.current) sliderRef.current.style.setProperty('--val', `${val}%`);
-  }
-  useEffect(() => updateFill(traffic), [traffic]);
-
-  function handleChange(e) {
-    const val = parseFloat(e.target.value);
-    draggingRef.current = true;
-    setTraffic(val); updateFill(val);
+  function handleChange(field, value) {
+    activeRef.current = true;
+    setMetrics(prev => ({ ...prev, [field]: value }));
     clearTimeout(timerRef.current);
     timerRef.current = setTimeout(async () => {
       setStatus('sending');
-      const newTemp = parseFloat((22 + (val / 100) * 28).toFixed(2));
-      const newCpu  = parseFloat((15 + (val / 100) * 70).toFixed(2));
       try {
-        await apiUpdate('F5 Firewall', {
-          network_traffic: parseFloat(val.toFixed(2)),
-          temperature:     newTemp,
-          cpu_load:        newCpu,
-        });
-        setTemp(newTemp); setCpu(newCpu);
+        await apiUpdate(device.name, { [field]: value });
         setStatus('ok');
-      } catch { setStatus('err'); }
-      setTimeout(() => { setStatus(null); draggingRef.current = false; }, 2000);
-    }, 500);
+      } catch (err) {
+        setStatus('err');
+        console.error(err.message);
+      }
+      setTimeout(() => { setStatus(null); activeRef.current = false; }, 1500);
+    }, 400);
   }
 
-  const color = isCrit ? '#ff2244' : traffic > 60 ? '#ff8c00' : '#00f5ff';
+  const isCrit = metrics.cpu_load > 90 || metrics.temperature > 45;
 
   return (
-    <div style={{ ...S.panel, border:`1px solid ${color}40`, transition:'border-color 0.4s' }}>
-      {isCrit && <div style={{ position:'absolute', inset:0, background:'rgba(255,34,68,0.04)',
-        animation:'blinkAlert 0.6s ease-in-out infinite', pointerEvents:'none' }} />}
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'16px' }}>
+    <div style={{ ...S.panel(isCrit ? '#ff2244' : color), borderColor: `${isCrit ? '#ff2244' : color}40` }}>
+      {isCrit && <div style={{ position: 'absolute', inset: 0, background: 'rgba(255,34,68,0.03)', animation: 'blinkAlert 0.8s ease-in-out infinite', pointerEvents: 'none' }} />}
+
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px' }}>
         <div>
-          <div style={S.label}>DEVICE_01</div>
-          <div style={{ ...S.neonText(color), fontSize:'18px', fontWeight:'bold', letterSpacing:'0.15em' }}>F5 BIG-IP</div>
-          <div style={{ color:`${color}60`, fontSize:'10px', letterSpacing:'0.2em' }}>PARE-FEU RÉSEAU</div>
-        </div>
-        <div style={{ width:'10px', height:'10px', borderRadius:'50%', background:isCrit?'#ff2244':'#00ff88',
-          boxShadow:`0 0 8px ${isCrit?'#ff2244':'#00ff88'}`, marginTop:'4px',
-          animation:'blinkAlert 1s ease-in-out infinite' }} />
-      </div>
-
-      {[['TEMPÉRATURE', temp.toFixed(1),    '°C',  temp/60],
-        ['CHARGE CPU',  cpu.toFixed(0),     '%',   cpu/100],
-        ['TRAFIC',      traffic.toFixed(1), ' Gbps', traffic/100]
-       ].map(([label, val, unit, pct]) => (
-        <div key={label} style={{ marginBottom:'10px' }}>
-          <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'4px' }}>
-            <span style={S.label}>{label}</span>
-            <span style={{ color:color, fontSize:'12px', fontFamily:'Courier New', fontWeight:'bold' }}>{val}{unit}</span>
+          <div style={{ color: 'rgba(0,245,255,0.4)', fontSize: '9px', letterSpacing: '0.2em', marginBottom: '2px' }}>
+            {deviceLabel(device.type)}
           </div>
-          <div style={{ height:'3px', background:'#1a1a2e', borderRadius:'2px' }}>
-            <div style={{ height:'100%', width:`${Math.min(100, pct*100)}%`, background:color,
-              borderRadius:'2px', transition:'width 0.6s ease', boxShadow:`0 0 4px ${color}80` }} />
+          <div style={{ color: isCrit ? '#ff2244' : color, textShadow: `0 0 10px ${color}60`, fontSize: '16px', fontWeight: 'bold', letterSpacing: '0.15em', fontFamily: 'Courier New' }}>
+            {device.name.toUpperCase()}
           </div>
         </div>
-      ))}
-
-      <div style={{ marginTop:'16px' }}>
-        <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'8px' }}>
-          <span style={S.label}>TRAFIC RÉSEAU</span>
-          <span style={{ ...S.neonText(color), fontSize:'14px', fontWeight:'bold', fontFamily:'Courier New' }}>
-            {traffic.toFixed(1)} Gbps
-          </span>
-        </div>
-        <input ref={sliderRef} type="range" min="0" max="100" step="0.1"
-          value={traffic} onChange={handleChange} className="cyan-slider" />
-        <div style={{ display:'flex', justifyContent:'space-between', color:'rgba(0,245,255,0.2)', fontSize:'9px', marginTop:'4px', fontFamily:'Courier New' }}>
-          <span>0</span><span>25</span><span>50</span><span>75</span><span>100 Gbps</span>
-        </div>
-      </div>
-
-      {isCrit && <div className="blink-alert" style={{ color:'#ff2244', fontSize:'10px', fontFamily:'Courier New',
-        border:'1px solid rgba(255,34,68,0.4)', padding:'6px', textAlign:'center', marginTop:'10px' }}>
-        ⚠ SATURATION RÉSEAU — RISQUE SURCHAUFFE
-      </div>}
-
-      <StatusBadge status={status} />
-    </div>
-  );
-}
-
-// ── CARD CISCO SWITCH ─────────────────────────────────────────────────────────
-function CiscoCard() {
-  const [fans,   setFans]   = useState(true);
-  const [temp,   setTemp]   = useState(21.5);
-  const [cpu,    setCpu]    = useState(10);
-  const [fanRpm, setFanRpm] = useState(1000);
-  const [status, setStatus] = useState(null);
-  const togglingRef = useRef(false);
-
-  const color = fans ? '#00ff88' : '#ff2244';
-
-  // Sync depuis l'API toutes les 3s
-  useEffect(() => {
-    function sync() {
-      if (togglingRef.current) return;
-      apiLive().then(d => {
-        const m = d.devices?.['Switch Cisco'];
-        if (!m) return;
-        const rpm = parseFloat(m.fan_speed) || 0;
-        setFans(rpm > 0);
-        setTemp(parseFloat(m.temperature) || 21.5);
-        setCpu(parseFloat(m.cpu_load) || 10);
-        setFanRpm(Math.round(rpm));
-      }).catch(()=>{});
-    }
-    sync();
-    const id = setInterval(sync, 1500);
-    return () => clearInterval(id);
-  }, []);
-
-  async function toggleFans() {
-    const next = !fans;
-    togglingRef.current = true;
-    setFans(next); setStatus('sending');
-    const newTemp = next ? 21.5 : 39.5;
-    const newCpu  = next ? 10   : 25;
-    const newRpm  = next ? 1000 : 0;
-    try {
-      await apiUpdate('Switch Cisco', { temperature: newTemp, fan_speed: newRpm, cpu_load: newCpu });
-      setTemp(newTemp); setCpu(newCpu); setFanRpm(newRpm);
-      setStatus('ok');
-    } catch { setStatus('err'); setFans(!next); }
-    setTimeout(() => { setStatus(null); togglingRef.current = false; }, 2000);
-  }
-
-  return (
-    <div style={{ ...S.panel, border:`1px solid ${color}40`, transition:'border-color 0.4s' }}>
-      {!fans && <div style={{ position:'absolute', inset:0, background:'rgba(255,34,68,0.04)',
-        animation:'blinkAlert 0.6s ease-in-out infinite', pointerEvents:'none' }} />}
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'16px' }}>
-        <div>
-          <div style={S.label}>DEVICE_02</div>
-          <div style={{ ...S.neonText(color), fontSize:'18px', fontWeight:'bold', letterSpacing:'0.15em' }}>CISCO CORE</div>
-          <div style={{ color:`${color}60`, fontSize:'10px', letterSpacing:'0.2em' }}>SWITCH RÉSEAU CŒUR</div>
-        </div>
-        <div style={{ width:'10px', height:'10px', borderRadius:'50%', background:color,
-          boxShadow:`0 0 8px ${color}`, animation:'blinkAlert 1s ease-in-out infinite' }} />
-      </div>
-
-      {[['TEMPÉRATURE', temp.toFixed(1),       '°C',  temp/60],
-        ['CHARGE CPU',  cpu.toFixed(0),        '%',   cpu/100],
-        ['FANS RPM',    fanRpm.toString(),      ' RPM', fanRpm/3000]
-       ].map(([label, val, unit, pct]) => (
-        <div key={label} style={{ marginBottom:'10px' }}>
-          <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'4px' }}>
-            <span style={S.label}>{label}</span>
-            <span style={{ color:color, fontSize:'12px', fontFamily:'Courier New', fontWeight:'bold' }}>{val}{unit}</span>
-          </div>
-          <div style={{ height:'3px', background:'#1a1a2e', borderRadius:'2px' }}>
-            <div style={{ height:'100%', width:`${pct*100}%`, background:color,
-              borderRadius:'2px', transition:'width 0.6s ease' }} />
-          </div>
-        </div>
-      ))}
-
-      <div style={{ border:`1px solid ${color}25`, padding:'14px', marginTop:'12px',
-        background:`${color}05` }}>
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-          <div>
-            <div style={{ ...S.neonText(color), fontSize:'13px', fontFamily:'Courier New' }}>Ventilateurs de la Baie</div>
-            <div style={{ color:`${color}50`, fontSize:'10px', letterSpacing:'0.1em', marginTop:'2px' }}>
-              {fans ? 'REFROIDISSEMENT ACTIF' : 'SYSTÈME DÉSACTIVÉ'}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: isCrit ? '#ff2244' : '#00ff88', boxShadow: `0 0 6px ${isCrit ? '#ff2244' : '#00ff88'}`, animation: 'blinkAlert 1.5s ease-in-out infinite' }} />
+          {!confirm ? (
+            <button onClick={() => setConfirm(true)}
+              style={{ background: 'transparent', border: '1px solid rgba(255,34,68,0.3)', color: 'rgba(255,34,68,0.5)', padding: '2px 8px', fontFamily: 'Courier New', fontSize: '9px', cursor: 'pointer', letterSpacing: '0.1em' }}>
+              ✕
+            </button>
+          ) : (
+            <div style={{ display: 'flex', gap: '4px' }}>
+              <button onClick={() => onDelete(device.name)}
+                style={{ background: 'rgba(255,34,68,0.15)', border: '1px solid #ff2244', color: '#ff2244', padding: '2px 8px', fontFamily: 'Courier New', fontSize: '9px', cursor: 'pointer' }}>
+                SUPPR.
+              </button>
+              <button onClick={() => setConfirm(false)}
+                style={{ background: 'transparent', border: '1px solid rgba(0,245,255,0.3)', color: 'rgba(0,245,255,0.5)', padding: '2px 8px', fontFamily: 'Courier New', fontSize: '9px', cursor: 'pointer' }}>
+                NON
+              </button>
             </div>
-          </div>
-          <button onClick={toggleFans}
-            style={{ width:'52px', height:'26px', background:fans?`${color}25`:`#ff224425`,
-              border:`1px solid ${color}`, borderRadius:'2px', cursor:'pointer', position:'relative', transition:'all 0.3s' }}>
-            <div style={{ position:'absolute', top:'3px', bottom:'3px', width:'18px', borderRadius:'1px',
-              background:color, boxShadow:`0 0 6px ${color}`,
-              left: fans ? 'calc(100% - 21px)' : '3px', transition:'left 0.3s' }} />
-            <span style={{ ...S.neonText(color), fontSize:'8px', letterSpacing:'0.1em',
-              position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center' }}>
-              {fans?'ON':'OFF'}
-            </span>
-          </button>
+          )}
         </div>
       </div>
 
-      {!fans && <div className="blink-alert" style={{ color:'#ff2244', fontSize:'10px', fontFamily:'Courier New',
-        border:'1px solid rgba(255,34,68,0.5)', padding:'8px', textAlign:'center', marginTop:'10px',
-        background:'rgba(255,34,68,0.08)' }}>
-        🔥 ALERTE — SURCHAUFFE IMMINENTE — TEMPÉRATURE CRITIQUE DANS ~120s
-      </div>}
+      {/* Sliders */}
+      <MetricSlider label="Température" value={metrics.temperature} min={0}   max={100} unit="°C"   color={metrics.temperature > 45 ? '#ff2244' : metrics.temperature > 30 ? '#ff8c00' : color} onChange={v => handleChange('temperature', v)} />
+      <MetricSlider label="CPU"         value={metrics.cpu_load}    min={0}   max={100} unit="%"    color={metrics.cpu_load > 90 ? '#ff2244' : metrics.cpu_load > 75 ? '#ff8c00' : color}        onChange={v => handleChange('cpu_load', v)} />
+      <MetricSlider label="RAM"         value={metrics.ram}         min={0}   max={100} unit="%"    color={metrics.ram > 90 ? '#ff2244' : metrics.ram > 75 ? '#ff8c00' : color}                  onChange={v => handleChange('ram', v)} />
+      <MetricSlider label="Trafic réseau" value={metrics.network_traffic} min={0} max={100} unit=" Gbps" color={metrics.network_traffic > 85 ? '#ff2244' : color}                              onChange={v => handleChange('network_traffic', v)} />
+      <MetricSlider label="Ventilateurs" value={metrics.fan_speed}  min={0}   max={5000} step={50} unit=" RPM" color={metrics.fan_speed === 0 ? '#ff2244' : color}                             onChange={v => handleChange('fan_speed', v)} />
 
-      <StatusBadge status={status} />
-    </div>
-  );
-}
-
-// ── CARD VM LINUX ─────────────────────────────────────────────────────────────
-function VMCard() {
-  const [cpu,      setCpu]      = useState(20);
-  const [temp,     setTemp]     = useState(23.0);
-  const [ram,      setRam]      = useState(34);
-  const [stressed, setStressed] = useState(false);
-  const [status,   setStatus]   = useState(null);
-  const [countdown,setCountdown]= useState(null);
-  const countRef    = useRef(null);
-  const rampRef     = useRef(null);
-  const stressedRef = useRef(false);
-
-  const color = cpu > 90 ? '#ff2244' : '#bf00ff';
-
-  // Sync depuis l'API toutes les 3s (pause pendant stress)
-  useEffect(() => {
-    function sync() {
-      if (stressedRef.current) return;
-      apiLive().then(d => {
-        const m = d.devices?.['VM Linux'];
-        if (!m) return;
-        setCpu(parseFloat(m.cpu_load) || 20);
-        setTemp(parseFloat(m.temperature) || 23);
-      }).catch(()=>{});
-    }
-    sync();
-    const id = setInterval(sync, 1500);
-    return () => clearInterval(id);
-  }, []);
-
-  async function stressCpu() {
-    if (stressed) return;
-    stressedRef.current = true;
-    let c = cpu;
-    rampRef.current = setInterval(() => {
-      c = Math.min(100, c + 10);
-      setCpu(c);
-      if (c >= 100) clearInterval(rampRef.current);
-    }, 80);
-    setStatus('sending');
-    try {
-      await apiUpdate('VM Linux', { cpu_load: 100, temperature: 48.0 });
-      setStressed(true); setStatus('ok'); setCpu(100); setTemp(48.0);
-      let t = 30; setCountdown(t);
-      countRef.current = setInterval(() => {
-        t--; setCountdown(t);
-        if (t <= 0) {
-          clearInterval(countRef.current);
-          setStressed(false); stressedRef.current = false;
-          setCountdown(null); setCpu(20); setTemp(23.0);
-          apiUpdate('VM Linux', { cpu_load: 20, temperature: 23.0 }).catch(()=>{});
-        }
-      }, 1000);
-    } catch { setStatus('err'); clearInterval(rampRef.current); setCpu(20); stressedRef.current = false; }
-    setTimeout(() => setStatus(null), 3000);
-  }
-
-  useEffect(() => () => { clearInterval(countRef.current); clearInterval(rampRef.current); }, []);
-
-  // Sparkline
-  const [bars, setBars] = useState(Array(20).fill(0.1));
-  useEffect(() => {
-    const id = setInterval(() => {
-      setBars(prev => [...prev.slice(1), stressed ? 0.7 + Math.random() * 0.3 : 0.1 + Math.random() * 0.2]);
-    }, 200);
-    return () => clearInterval(id);
-  }, [stressed]);
-
-  return (
-    <div style={{ ...S.panel, border:`1px solid ${color}40`, transition:'border-color 0.4s' }}>
-      {cpu > 90 && <div style={{ position:'absolute', inset:0, background:'rgba(255,34,68,0.04)',
-        animation:'blinkAlert 0.6s ease-in-out infinite', pointerEvents:'none' }} />}
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'16px' }}>
-        <div>
-          <div style={S.label}>DEVICE_03</div>
-          <div style={{ ...S.neonText(color), fontSize:'18px', fontWeight:'bold', letterSpacing:'0.15em' }}>VM LINUX</div>
-          <div style={{ color:`${color}60`, fontSize:'10px', letterSpacing:'0.2em' }}>MACHINE VIRTUELLE</div>
-        </div>
-        <div style={{ width:'10px', height:'10px', borderRadius:'50%', background:color,
-          boxShadow:`0 0 8px ${color}`, animation:'blinkAlert 1s ease-in-out infinite' }} />
-      </div>
-
-      {[['TEMPÉRATURE', temp.toFixed(1),              '°C', temp/60],
-        ['CHARGE CPU',  cpu.toFixed(0),               '%',  cpu/100],
-        ['MÉMOIRE RAM', stressed?'78':ram.toString(),  '%',  stressed?0.78:ram/100]
-       ].map(([label, val, unit, pct]) => (
-        <div key={label} style={{ marginBottom:'10px' }}>
-          <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'4px' }}>
-            <span style={S.label}>{label}</span>
-            <span style={{ color:color, fontSize:'12px', fontFamily:'Courier New', fontWeight:'bold' }}>{val}{unit}</span>
-          </div>
-          <div style={{ height:'3px', background:'#1a1a2e', borderRadius:'2px' }}>
-            <div style={{ height:'100%', width:`${Math.min(100,pct*100)}%`, background:color,
-              borderRadius:'2px', transition:'width 0.6s ease' }} />
-          </div>
-        </div>
-      ))}
-
-      {/* Sparkline */}
-      <div style={{ marginBottom:'12px' }}>
-        <div style={S.label}>ACTIVITÉ CPU TEMPS RÉEL</div>
-        <div style={{ display:'flex', alignItems:'flex-end', gap:'2px', height:'32px',
-          background:'rgba(0,0,0,0.3)', padding:'2px 4px', border:'1px solid rgba(191,0,255,0.1)' }}>
-          {bars.map((h,i) => (
-            <div key={i} style={{ flex:1, borderRadius:'1px', transition:'height 0.15s',
-              height:`${h*100}%`,
-              background: stressed ? `rgba(255,${34+h*80},68,${0.4+h*0.5})` : `rgba(191,0,255,${0.3+h*0.5})` }} />
-          ))}
-        </div>
-      </div>
-
-      {/* Bouton stress */}
-      <button onClick={stressCpu} disabled={stressed}
-        style={{ width:'100%', padding:'12px', background:'transparent',
-          border:`2px solid ${stressed?'#ff2244':'#bf00ff'}`,
-          color: stressed?'#ff2244':'#bf00ff',
-          textShadow:`0 0 8px ${stressed?'#ff2244':'#bf00ff'}`,
-          fontFamily:'Courier New', letterSpacing:'0.12em', cursor: stressed?'not-allowed':'pointer',
-          fontSize:'11px', transition:'all 0.2s',
-          boxShadow: stressed ? '0 0 16px rgba(255,34,68,0.2)' : '0 0 8px rgba(191,0,255,0.15)' }}>
-        {status === 'sending' ? '⚡ INJECTION EN COURS...' :
-         stressed ? `⚡ STRESS ACTIF — RESET DANS ${countdown}s` :
-         '💀 DÉCLENCHER STRESS CPU (BOUCLE INFINIE)'}
-      </button>
-
-      {stressed && (
-        <div style={{ height:'3px', background:'rgba(255,34,68,0.2)', borderRadius:'2px', marginTop:'6px' }}>
-          <div style={{ height:'100%', background:'#ff2244', borderRadius:'2px', transition:'width 1s linear',
-            width:`${countdown!=null?(countdown/30)*100:0}%`, boxShadow:'0 0 4px rgba(255,34,68,0.6)' }} />
+      {/* Status */}
+      {status && (
+        <div style={{ marginTop: '8px', fontSize: '10px', fontFamily: 'Courier New', display: 'flex', alignItems: 'center', gap: '6px',
+          color: status === 'ok' ? '#00ff88' : status === 'err' ? '#ff2244' : 'rgba(0,245,255,0.5)' }}>
+          {status === 'sending' && <div style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#00f5ff', animation: 'blinkAlert 0.4s infinite' }} />}
+          {status === 'sending' ? 'ENVOI...' : status === 'ok' ? '✓ SYNCHRONISÉ' : '✗ ERREUR'}
         </div>
       )}
-
-      {cpu > 90 && <div className="blink-alert" style={{ color:'#ff2244', fontSize:'10px', fontFamily:'Courier New',
-        border:'1px solid rgba(255,34,68,0.4)', padding:'6px', textAlign:'center', marginTop:'8px' }}>
-        ⚠ CPU À 100% — RISQUE DE PANNE THERMIQUE
-      </div>}
-
-      <StatusBadge status={status} />
+      {isCrit && (
+        <div style={{ marginTop: '8px', color: '#ff2244', fontSize: '10px', fontFamily: 'Courier New', border: '1px solid rgba(255,34,68,0.4)', padding: '5px 8px', textAlign: 'center', animation: 'blinkAlert 0.8s infinite' }}>
+          ⚠ SEUIL CRITIQUE DÉPASSÉ
+        </div>
+      )}
     </div>
   );
 }
 
-// ── STATUS BADGE ──────────────────────────────────────────────────────────────
-function StatusBadge({ status }) {
-  if (!status) return null;
-  if (status === 'sending') return (
-    <div style={{ color:'rgba(0,245,255,0.5)', fontSize:'10px', fontFamily:'Courier New',
-      marginTop:'8px', display:'flex', alignItems:'center', gap:'6px' }}>
-      <div style={{ width:'6px', height:'6px', borderRadius:'50%', background:'#00f5ff', animation:'blinkAlert 0.5s infinite' }} />
-      ENVOI EN COURS...
-    </div>
-  );
+// ── MODAL AJOUT DEVICE ────────────────────────────────────────────────────────
+const DEVICE_TYPES = [
+  { value: 'firewall', label: 'Pare-feu' },
+  { value: 'switch',   label: 'Switch réseau' },
+  { value: 'server',   label: 'Serveur physique' },
+  { value: 'vm',       label: 'Machine virtuelle' },
+  { value: 'router',   label: 'Routeur' },
+  { value: 'storage',  label: 'Stockage / NAS' },
+];
+
+function AddDeviceModal({ onAdd, onClose }) {
+  const [name, setName]   = useState('');
+  const [type, setType]   = useState('server');
+  const [err, setErr]     = useState('');
+  const [load, setLoad]   = useState(false);
+  const [metrics, setMetrics] = useState({ temperature: 20, cpu_load: 10, ram: 20, network_traffic: 0.5, fan_speed: 1000 });
+
+  const color = deviceColor(type);
+
+  function setM(field, val) { setMetrics(prev => ({ ...prev, [field]: val })); }
+
+  async function submit(e) {
+    e.preventDefault(); setErr('');
+    if (!name.trim()) { setErr('Nom requis.'); return; }
+    setLoad(true);
+    try {
+      await apiAddDevice(name.trim(), type, metrics);
+      onAdd();
+    } catch (e) { setErr(e.message); }
+    finally { setLoad(false); }
+  }
+
   return (
-    <div className="fade-up" style={{ fontSize:'10px', fontFamily:'Courier New', marginTop:'8px',
-      color: status==='ok' ? '#00ff88' : '#ff2244' }}>
-      {status==='ok' ? '✓ SYNCHRONISÉ' : '✗ ERREUR DE SYNCHRONISATION'}
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+      <div style={{ background: '#0d0d14', border: `1px solid ${color}40`, padding: '24px', width: '460px', maxHeight: '90vh', overflowY: 'auto', boxShadow: `0 0 60px ${color}15` }}>
+        {/* Header modal */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          <div>
+            <div style={{ color, fontFamily: 'Courier New', fontWeight: 'bold', fontSize: '14px', letterSpacing: '0.2em' }}>
+              + NOUVEL ÉQUIPEMENT
+            </div>
+            <div style={{ color: 'rgba(0,245,255,0.3)', fontSize: '10px', letterSpacing: '0.15em', marginTop: '2px' }}>
+              Sera visible sur tous les dashboards
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: 'rgba(255,34,68,0.6)', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+        </div>
+
+        <form onSubmit={submit}>
+          {/* Nom */}
+          <div style={{ marginBottom: '14px' }}>
+            <div style={S.label}>NOM DE L'ÉQUIPEMENT</div>
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="ex: Firewall Nord-Paris"
+              style={{ width: '100%', background: '#060810', border: `1px solid ${color}30`, color, padding: '8px 12px', fontFamily: 'Courier New', fontSize: '13px', outline: 'none', boxSizing: 'border-box' }} />
+          </div>
+
+          {/* Type */}
+          <div style={{ marginBottom: '18px' }}>
+            <div style={S.label}>TYPE</div>
+            <select value={type} onChange={e => setType(e.target.value)}
+              style={{ width: '100%', background: '#060810', border: `1px solid ${color}30`, color, padding: '8px 12px', fontFamily: 'Courier New', fontSize: '12px', outline: 'none', cursor: 'pointer' }}>
+              {DEVICE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+          </div>
+
+          {/* Métriques initiales */}
+          <div style={{ borderTop: `1px solid ${color}15`, paddingTop: '14px', marginBottom: '16px' }}>
+            <div style={{ color: 'rgba(0,245,255,0.4)', fontSize: '10px', letterSpacing: '0.2em', marginBottom: '12px' }}>
+              MÉTRIQUES INITIALES
+            </div>
+            <MetricSlider label="Température" value={metrics.temperature}     min={0}   max={100}  unit="°C"    color={color} onChange={v => setM('temperature', v)} />
+            <MetricSlider label="CPU"         value={metrics.cpu_load}        min={0}   max={100}  unit="%"     color={color} onChange={v => setM('cpu_load', v)} />
+            <MetricSlider label="RAM"         value={metrics.ram}             min={0}   max={100}  unit="%"     color={color} onChange={v => setM('ram', v)} />
+            <MetricSlider label="Trafic réseau" value={metrics.network_traffic} min={0} max={100}  unit=" Gbps" color={color} onChange={v => setM('network_traffic', v)} />
+            <MetricSlider label="Ventilateurs" value={metrics.fan_speed}       min={0}  max={5000} step={50} unit=" RPM" color={color} onChange={v => setM('fan_speed', v)} />
+          </div>
+
+          {err && <div style={{ color: '#ff2244', fontSize: '11px', marginBottom: '12px', padding: '6px 10px', border: '1px solid rgba(255,34,68,0.3)', background: 'rgba(255,34,68,0.05)' }}>⚠ {err}</div>}
+
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button type="submit" disabled={load}
+              style={{ flex: 1, padding: '10px', background: `${color}15`, border: `2px solid ${color}`, color, fontFamily: 'Courier New', letterSpacing: '0.15em', cursor: 'pointer', fontSize: '12px' }}>
+              {load ? 'CRÉATION...' : '✓ CRÉER L\'ÉQUIPEMENT'}
+            </button>
+            <button type="button" onClick={onClose}
+              style={{ padding: '10px 16px', background: 'transparent', border: '1px solid rgba(255,34,68,0.3)', color: 'rgba(255,34,68,0.5)', fontFamily: 'Courier New', fontSize: '11px', cursor: 'pointer' }}>
+              ANNULER
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
 
 // ── DASHBOARD ADMIN ───────────────────────────────────────────────────────────
 function AdminDashboard({ user, onLogout }) {
-  const [time, setTime] = useState(new Date());
-  useEffect(() => { const id = setInterval(()=>setTime(new Date()),1000); return ()=>clearInterval(id); }, []);
+  const [devices,    setDevices]    = useState([]);
+  const [liveData,   setLiveData]   = useState({});
+  const [showModal,  setShowModal]  = useState(false);
+  const [time,       setTime]       = useState(new Date());
+  const [error,      setError]      = useState(null);
+
+  // Horloge
+  useEffect(() => {
+    const id = setInterval(() => setTime(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Charger la liste des devices
+  const loadDevices = useCallback(async () => {
+    try {
+      const d = await apiGetDevices();
+      setDevices(d.devices || []);
+    } catch (e) { console.error('loadDevices:', e.message); }
+  }, []);
+
+  // Polling live métriques toutes les 1.5s
+  useEffect(() => {
+    loadDevices();
+    const pollLive = async () => {
+      try {
+        const d = await apiGetLive();
+        setLiveData(d.devices || {});
+        setError(null);
+      } catch (e) { setError(e.message); }
+    };
+    pollLive();
+    const liveId   = setInterval(pollLive,   1500);
+    const deviceId = setInterval(loadDevices, 5000);
+    return () => { clearInterval(liveId); clearInterval(deviceId); };
+  }, [loadDevices]);
+
+  async function handleDelete(name) {
+    try {
+      await apiDeleteDevice(name);
+      await loadDevices();
+    } catch (e) { alert(`Erreur suppression: ${e.message}`); }
+  }
 
   return (
-    <div style={{ minHeight:'100vh', background:'#0a0a0c' }}>
+    <div style={{ minHeight: '100vh', background: '#0a0a0c' }}>
       {/* Header */}
-      <div style={{ background:'#0d0d14', borderBottom:'1px solid rgba(0,245,255,0.1)',
-        padding:'12px 24px', display:'flex', alignItems:'center', justifyContent:'space-between',
-        position:'sticky', top:0, zIndex:50 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:'12px' }}>
-          <span style={{ ...S.neonText(), fontFamily:'Courier New', fontWeight:'bold', letterSpacing:'0.3em', fontSize:'15px' }}>
-            GREENOPS
-          </span>
-          <span style={{ color:'rgba(0,245,255,0.3)', fontSize:'11px', letterSpacing:'0.2em' }}>
-            TOUR DE CONTRÔLE
+      <div style={{ background: '#0d0d14', borderBottom: '1px solid rgba(0,245,255,0.1)', padding: '12px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 50 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <span style={{ color: '#00f5ff', textShadow: '0 0 10px #00f5ff40', fontFamily: 'Courier New', fontWeight: 'bold', letterSpacing: '0.3em', fontSize: '15px' }}>GREENOPS</span>
+          <span style={{ color: 'rgba(0,245,255,0.3)', fontSize: '11px', letterSpacing: '0.2em' }}>TOUR DE CONTRÔLE</span>
+          <span style={{ background: 'rgba(0,245,255,0.08)', border: '1px solid rgba(0,245,255,0.2)', color: 'rgba(0,245,255,0.6)', fontSize: '10px', padding: '2px 8px', fontFamily: 'Courier New' }}>
+            {devices.length} DEVICE{devices.length !== 1 ? 'S' : ''}
           </span>
         </div>
-        <div style={{ display:'flex', alignItems:'center', gap:'16px' }}>
-          <span style={{ color:'rgba(0,245,255,0.4)', fontFamily:'Courier New', fontSize:'12px' }}>
-            {time.toLocaleTimeString('fr-FR')}
-          </span>
-          <span style={{ color:'rgba(0,255,136,0.6)', fontSize:'11px', fontFamily:'Courier New', letterSpacing:'0.1em' }}>
-            {user.username} // {user.role?.toUpperCase()}
-          </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {error && <span style={{ color: '#ff6b35', fontSize: '10px', fontFamily: 'Courier New' }}>⚠ {error}</span>}
+          <span style={{ color: 'rgba(0,245,255,0.4)', fontFamily: 'Courier New', fontSize: '12px' }}>{time.toLocaleTimeString('fr-FR')}</span>
+          <button onClick={() => setShowModal(true)}
+            style={{ background: 'rgba(0,245,255,0.08)', border: '1px solid rgba(0,245,255,0.4)', color: '#00f5ff', padding: '6px 14px', fontFamily: 'Courier New', fontSize: '11px', letterSpacing: '0.15em', cursor: 'pointer' }}>
+            + AJOUTER ÉQUIPEMENT
+          </button>
+          <span style={{ color: 'rgba(0,255,136,0.6)', fontSize: '11px', fontFamily: 'Courier New' }}>{user.username} // {user.role?.toUpperCase()}</span>
           <button onClick={onLogout}
-            style={{ background:'transparent', border:'1px solid rgba(255,34,68,0.3)',
-              color:'rgba(255,34,68,0.6)', padding:'4px 12px', fontFamily:'Courier New',
-              fontSize:'10px', cursor:'pointer', letterSpacing:'0.15em' }}>
+            style={{ background: 'transparent', border: '1px solid rgba(255,34,68,0.3)', color: 'rgba(255,34,68,0.6)', padding: '4px 12px', fontFamily: 'Courier New', fontSize: '10px', cursor: 'pointer' }}>
             DÉCO
           </button>
         </div>
       </div>
 
-      {/* Grid des 3 cartes */}
-      <div style={{ padding:'20px', display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'16px' }}>
-        <F5Card />
-        <CiscoCard />
-        <VMCard />
+      {/* Grid des cards */}
+      <div style={{ padding: '20px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' }}>
+        {devices.length === 0 ? (
+          <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '60px', color: 'rgba(0,245,255,0.25)', fontFamily: 'Courier New', fontSize: '13px', letterSpacing: '0.2em' }}>
+            <div style={{ fontSize: '32px', marginBottom: '12px' }}>◻</div>
+            AUCUN ÉQUIPEMENT — CLIQUER SUR "+ AJOUTER ÉQUIPEMENT"
+          </div>
+        ) : (
+          devices.map(device => (
+            <DeviceCard
+              key={device.name}
+              device={device}
+              liveMetrics={liveData[device.name]}
+              onDelete={handleDelete}
+            />
+          ))
+        )}
       </div>
 
       {/* Footer */}
-      <div style={{ padding:'12px 24px', borderTop:'1px solid rgba(0,245,255,0.06)',
-        display:'flex', justifyContent:'space-between',
-        color:'rgba(0,245,255,0.2)', fontSize:'10px', fontFamily:'Courier New', letterSpacing:'0.1em' }}>
-        <span>GREENOPS DIGITAL TWIN v1.0.0</span>
-        <span>API: /api/* → TRAEFIK → BACKEND:3000</span>
-        <span>3 DEVICES EN LIGNE</span>
+      <div style={{ padding: '10px 24px', borderTop: '1px solid rgba(0,245,255,0.06)', display: 'flex', justifyContent: 'space-between', color: 'rgba(0,245,255,0.2)', fontSize: '10px', fontFamily: 'Courier New', letterSpacing: '0.1em' }}>
+        <span>GREENOPS DIGITAL TWIN v2.0.0</span>
+        <span>SYNC: 1.5s — API: /api/*</span>
+        <span>{devices.length} DEVICE{devices.length !== 1 ? 'S' : ''} EN LIGNE</span>
       </div>
+
+      {/* Modal */}
+      {showModal && (
+        <AddDeviceModal
+          onAdd={() => { loadDevices(); setShowModal(false); }}
+          onClose={() => setShowModal(false)}
+        />
+      )}
     </div>
   );
 }
@@ -524,6 +453,6 @@ export default function App() {
       } catch { localStorage.removeItem('greenops_token'); }
     }
   }, []);
-  if (!user) return <Login onLogin={d => setUser({ username:d.username, role:d.role })} />;
+  if (!user) return <Login onLogin={d => setUser({ username: d.username, role: d.role })} />;
   return <AdminDashboard user={user} onLogout={() => { localStorage.removeItem('greenops_token'); setUser(null); }} />;
 }

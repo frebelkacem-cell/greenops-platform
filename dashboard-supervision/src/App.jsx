@@ -5,8 +5,18 @@ import {
   Tooltip, ResponsiveContainer, ReferenceLine,
 } from 'recharts';
 
-// ── Couleurs par device ───────────────────────────────────────────────────────
-const COLORS = { 'F5 Firewall': '#10e888', 'Switch Cisco': '#00d4aa', 'VM Linux': '#3b82f6' };
+// ── Couleurs dynamiques — s'adapte à n'importe quel device ───────────────────
+const PALETTE = ['#10e888','#00d4aa','#3b82f6','#f59e0b','#bf00ff','#ef4444','#06b6d4','#84cc16','#f472b6','#a78bfa'];
+const colorCache = {};
+function getDeviceColor(name) {
+  if (!colorCache[name]) {
+    const keys = Object.keys(colorCache);
+    colorCache[name] = PALETTE[keys.length % PALETTE.length];
+  }
+  return colorCache[name];
+}
+// Compat : COLORS est calculé dynamiquement à l'usage
+const COLORS = new Proxy({}, { get: (_, name) => getDeviceColor(name) });
 
 // ── Utilitaires ───────────────────────────────────────────────────────────────
 function pueColor(pue) {
@@ -234,7 +244,7 @@ function checkAlerts(latest) {
 
 function Dashboard({ user, onLogout }) {
   const [latest,   setLatest]   = useState(null);
-  const [series,   setSeries]   = useState({ 'F5 Firewall':[], 'Switch Cisco':[], 'VM Linux':[] });
+  const [series,   setSeries]   = useState({});
   const [pueHist,  setPueHist]  = useState([]);
   const [alerts,   setAlerts]   = useState([]);
   const [view,     setView]     = useState('live');
@@ -330,7 +340,8 @@ function Dashboard({ user, onLogout }) {
 
             {/* Cartes devices */}
             <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'12px' }}>
-              {Object.entries(COLORS).map(([device, color]) => {
+              {Object.keys(series).map(device => {
+                const color = getDeviceColor(device);
                 const m = latest?.devices?.[device];
                 return (
                   <div key={device} className="panel" style={{ padding:'14px', borderLeftColor:color, borderLeftWidth:'3px' }}>
@@ -374,12 +385,15 @@ function Dashboard({ user, onLogout }) {
             <div style={{ color:'rgba(136,146,176,0.6)', fontSize:'11px', fontFamily:'Courier New',
               letterSpacing:'0.15em', marginBottom:'12px', display:'flex', gap:'20px', alignItems:'center' }}>
               <span>TEMPÉRATURES TEMPS RÉEL (°C)</span>
-              {Object.entries(COLORS).map(([d,c]) => (
-                <span key={d} style={{ display:'flex', alignItems:'center', gap:'6px' }}>
-                  <span style={{ display:'inline-block', width:'16px', height:'2px', background:c, boxShadow:`0 0 4px ${c}` }} />
-                  <span style={{ color:c, fontSize:'10px' }}>{d}</span>
-                </span>
-              ))}
+              {Object.keys(series).map(d => {
+                const c = getDeviceColor(d);
+                return (
+                  <span key={d} style={{ display:'flex', alignItems:'center', gap:'6px' }}>
+                    <span style={{ display:'inline-block', width:'16px', height:'2px', background:c, boxShadow:`0 0 4px ${c}` }} />
+                    <span style={{ color:c, fontSize:'10px' }}>{d}</span>
+                  </span>
+                );
+              })}
             </div>
             <div style={{ height:'200px' }}>
               <ResponsiveContainer width="100%" height="100%">
@@ -391,11 +405,14 @@ function Dashboard({ user, onLogout }) {
                   <Tooltip contentStyle={{ background:'#0b0e1a', border:'1px solid #1a2040', fontFamily:'Courier New', fontSize:'11px' }} />
                   <ReferenceLine y={35} stroke="rgba(255,45,85,0.3)" strokeDasharray="4 3" />
                   <ReferenceLine y={30} stroke="rgba(255,107,53,0.25)" strokeDasharray="4 3" />
-                  {Object.entries(COLORS).map(([device, color]) => (
-                    <Line key={device} type="monotone" dataKey={device} stroke={color} strokeWidth={1.5}
-                      dot={false} isAnimationActive={false} connectNulls
-                      style={{ filter:`drop-shadow(0 0 3px ${color}60)` }} />
-                  ))}
+                  {Object.keys(series).map(device => {
+                    const color = getDeviceColor(device);
+                    return (
+                      <Line key={device} type="monotone" dataKey={device} stroke={color} strokeWidth={1.5}
+                        dot={false} isAnimationActive={false} connectNulls
+                        style={{ filter:`drop-shadow(0 0 3px ${color}60)` }} />
+                    );
+                  })}
                 </LineChart>
               </ResponsiveContainer>
             </div>

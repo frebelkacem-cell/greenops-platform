@@ -30,9 +30,16 @@ async function initDatabase() {
         network_traffic NUMERIC(8,3),
         cpu_load        NUMERIC(5,2),
         fan_speed       INTEGER,
+        ram             NUMERIC(5,2),
         global_pue      NUMERIC(6,4),
         recorded_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
+    `);
+
+    // Migration: ajoute ram si la table existait avant cette colonne
+    await client.query(`
+      ALTER TABLE metrics_history
+        ADD COLUMN IF NOT EXISTS ram NUMERIC(5,2)
     `);
 
     const existing = await client.query(

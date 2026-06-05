@@ -1,6 +1,6 @@
 const express = require('express');
 const { pool } = require('./db');
-const { getAllDevicesState, updateDeviceState, DEVICES } = require('./redis');
+const { getAllDevicesState, updateDeviceState, getRegisteredDevices } = require('./redis');
 const { computeGlobalPUE } = require('./pue');
 const { authenticate, requireRole } = require('./auth.middleware');
 const { updatePUEGauge, updateDeviceGauges } = require('./prometheus');
@@ -25,11 +25,15 @@ router.post('/update', authenticate, requireRole('admin'), async (req, res) => {
   if (!device || !updates || typeof updates !== 'object') {
     return res.status(400).json({ error: '"device" et "updates" requis.' });
   }
-  if (!DEVICES.includes(device)) {
-    return res.status(400).json({ error: `Device inconnu. Valides: ${DEVICES.join(', ')}` });
+
+  // Vérification dynamique — n'importe quel device enregistré est valide
+  const registered = await getRegisteredDevices();
+  if (!registered.some(d => d.name === device)) {
+    const names = registered.map(d => d.name).join(', ');
+    return res.status(400).json({ error: `Device inconnu. Enregistrés: ${names || '(aucun)'}` });
   }
 
-  const ALLOWED = ['temperature', 'network_traffic', 'cpu_load', 'fan_speed'];
+  const ALLOWED = ['temperature', 'network_traffic', 'cpu_load', 'fan_speed', 'ram'];
   const sanitized = {};
   for (const field of ALLOWED) {
     if (updates[field] !== undefined) {
@@ -43,18 +47,23 @@ router.post('/update', authenticate, requireRole('admin'), async (req, res) => {
   }
 
   try {
-    const newState    = await updateDeviceState(device, sanitized);
-    const allDevices  = await getAllDevicesState();
-    const globalPUE   = computeGlobalPUE(allDevices);
+    const newState   = await updateDeviceState(device, sanitized);
+    const allDevices = await getAllDevicesState();
+    const globalPUE  = computeGlobalPUE(allDevices);
     updatePUEGauge(globalPUE);
     updateDeviceGauges(allDevices);
 
     await pool.query(
       `INSERT INTO metrics_history
-        (device, temperature, network_traffic, cpu_load, fan_speed, global_pue)
-       VALUES ($1,$2,$3,$4,$5,$6)`,
-      [device, newState.temperature ?? null, newState.network_traffic ?? null,
-       newState.cpu_load ?? null, newState.fan_speed ?? null, globalPUE]
+        (device, temperature, network_traffic, cpu_load, fan_speed, ram, global_pue)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [device,
+       newState.temperature     ?? null,
+       newState.network_traffic ?? null,
+       newState.cpu_load        ?? null,
+       newState.fan_speed       ?? null,
+       newState.ram             ?? null,
+       globalPUE]
     );
 
     return res.json({ message: `"${device}" mis à jour.`, device, newState, globalPUE });

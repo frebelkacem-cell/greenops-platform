@@ -37,6 +37,13 @@ const fanGauge = new client.Gauge({
   registers: [register],
 });
 
+const ramGauge = new client.Gauge({
+  name: 'greenops_device_ram',
+  help: 'Utilisation RAM par équipement (%)',
+  labelNames: ['device'],
+  registers: [register],
+});
+
 function updatePUEGauge(value) {
   pueGauge.set(value);
 }
@@ -47,6 +54,7 @@ function updateDeviceGauges(devicesState) {
     if (metrics.cpu_load        != null) cpuGauge.set({ device }, metrics.cpu_load);
     if (metrics.network_traffic != null) networkGauge.set({ device }, metrics.network_traffic);
     if (metrics.fan_speed       != null) fanGauge.set({ device }, metrics.fan_speed);
+    if (metrics.ram             != null) ramGauge.set({ device }, metrics.ram);
   }
 }
 
